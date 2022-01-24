@@ -170,53 +170,6 @@ int subscribe_server_sock(int fd, const char* addr) {
     return 0;
 }
 
-struct socket_t {
-    int fd;
-    struct sockaddr* sockaddr;
-    socklen_t sockaddr_len;
-};
-struct socket_t* get_send_socket(const char* addr) {
-    struct socket_t* sock = (struct socket_t*)malloc(sizeof(struct socket_t));
-
-    int addr_family = get_address_family(addr);
-    if (addr_family == -1) {
-        sock->fd = -1;
-        return sock;
-    }
-
-    sock->fd = socket(addr_family, SOCK_DGRAM, 0);
-    if (sock->fd == -1) {
-        sock->fd = -2;
-        return sock;
-    }
-
-    switch (addr_family) {
-        case AF_INET: {
-            sock->sockaddr_len = sizeof(struct sockaddr_in);
-            struct sockaddr_in* addr_v4 = (struct sockaddr_in*)malloc(sock->sockaddr_len);
-            inet_pton(AF_INET, addr, &addr_v4->sin_addr);
-            addr_v4->sin_family = AF_INET;
-            addr_v4->sin_port = htons(4136);
-            sock->sockaddr = (struct sockaddr*)addr_v4;
-            break;
-        }
-        case AF_INET6: {
-            sock->sockaddr_len = sizeof(struct sockaddr_in6);
-            struct sockaddr_in6* addr_v6 = (struct sockaddr_in6*)malloc(sock->sockaddr_len);
-            inet_pton(AF_INET6, addr, &addr_v6->sin6_addr);
-            addr_v6->sin6_family = AF_INET6;
-            addr_v6->sin6_port = htons(4136);
-            sock->sockaddr = (struct sockaddr*)addr_v6;
-            break;
-        }
-        default:
-            sock->fd = -3;
-            return sock;
-    }
-
-    return sock;
-}
-
 struct intervals_t {
     int hello;
     int dead;
@@ -225,13 +178,14 @@ struct intervals_t {
 int main(int argc, char *argv[]) {
     char* argv0 = argv[0];
     struct rawargs* args = parse_args(argc, argv);
-    if (args->show_usage) {
-        print_usage(argv0);
-        return 0;
-    }
+
     if (args->error) {
         print_usage(argv0);
         return 1;
+    }
+    if (args->show_usage) {
+        print_usage(argv0);
+        return 0;
     }
 
     int v4_server_sock = -1;
@@ -242,49 +196,30 @@ int main(int argc, char *argv[]) {
         char* group = NULL;
         while ((group = groups[i++]) != NULL) {
             int addr_family = get_address_family(group);
+            int *sock = NULL;
             switch (addr_family) {
-                case AF_INET: {
-                    if (v4_server_sock < 0) {
-                        v4_server_sock = get_server_sock(AF_INET);
-                    }
-                    if (v4_server_sock < 0) {
-                        fprintf(stderr, "Cannot create listening socket for %s\n", group);
-                        return 2;
-                    }
-                    if (subscribe_server_sock(v4_server_sock, group) < 0) {
-                        fprintf(stderr, "Cannot subscribe listening socket for group %s\n", group);
-                        return 3;
-                    }
+                case AF_INET:
+                    sock = &v4_server_sock;
                     break;
-                }
-                case AF_INET6: {
-                    if (v6_server_sock < 0) {
-                        v6_server_sock = get_server_sock(AF_INET6);
-                    }
-                    if (v6_server_sock < 0) {
-                        fprintf(stderr, "Cannot create listening socket for %s\n", group);
-                        return 2;
-                    }
-                    if (subscribe_server_sock(v6_server_sock, group) < 0) {
-                        fprintf(stderr, "Cannot subscribe listening socket for group %s\n", group);
-                        return 3;
-                    }
+                case AF_INET6:
+                    sock = &v6_server_sock;
                     break;
-                }
                 default:
                     fprintf(stderr, "Wrong multicast group: %s\n", group);
                     return 2;
             }
+            if (*sock < 0) {
+                *sock = get_server_sock(addr_family);
+            }
+            if (*sock < 0) {
+                fprintf(stderr, "Cannot create listening socket for %s\n", group);
+                return 2;
+            }
+            if (subscribe_server_sock(*sock, group) < 0) {
+                fprintf(stderr, "Cannot subscribe listening socket for group %s\n", group);
+                return 3;
+            }
             printf("Listening for group %s\n", group);
-
-            /*char buf[1];
-            buf[0] = getchar();
-
-            struct socket* send_sock = get_send_socket(group);
-            sendto(send_sock->fd, buf, sizeof(buf), 0, send_sock->sockaddr, send_sock->sockaddr_len);
-
-            int result = read(recv_sock->fd, buf, sizeof(buf));
-            printf("read=%d, buf=%s\n", result, buf);*/
         }
     }
 
